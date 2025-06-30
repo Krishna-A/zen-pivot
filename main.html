@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Zen-Pivot Prototype</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f4f4f4;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    svg {
+      border: 1px solid #ccc;
+      background: white;
+    }
+    .vertex {
+      fill: #3498db;
+      cursor: pointer;
+    }
+    .ghost-circle {
+      stroke: gray;
+      stroke-dasharray: 4 2;
+      fill: none;
+    }
+    .ghost-circle.animate {
+      stroke-dasharray: 10 6;
+      animation: dash-spin 1s linear infinite;
+    }
+    .pulse {
+      stroke: #3498db;
+      stroke-width: 3;
+      fill: none;
+      animation: pulse 1s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0% { r: 8; opacity: 0.4; }
+      50% { r: 20; opacity: 1; }
+      100% { r: 8; opacity: 0.4; }
+    }
+    @keyframes dash-spin {
+      0% { stroke-dashoffset: 0; }
+      100% { stroke-dashoffset: 32; }
+    }
+  </style>
+</head>
+<body>
+  <svg id="board" width="600" height="600"></svg>
+
+  <script>
+    const svg = document.getElementById("board");
+    const width = svg.clientWidth;
+    const height = svg.clientHeight;
+
+    let triangle = [
+      { x: 100, y: 500 },
+      { x: 140, y: 540 },
+      { x: 100, y: 580 }
+    ];
+
+    const goalTriangle = [
+      { x: 500, y: 100 },
+      { x: 540, y: 140 },
+      { x: 500, y: 180 }
+    ];
+
+    let pivotIndex = null;
+    let movingIndex = null;
+    let isRotating = false;
+
+    const triangleGroup = createSvgElement("g");
+    const goalOutline = createSvgElement("polygon", {
+      points: pointsToString(goalTriangle),
+      fill: "none",
+      stroke: "#aaa",
+      strokeWidth: 2,
+      strokeDasharray: "4 4"
+    });
+    svg.appendChild(goalOutline);
+    svg.appendChild(triangleGroup);
+
+    svg.addEventListener("mousemove", onMouseMove);
+    svg.addEventListener("mousedown", onMouseClick);
+
+    function renderTriangle() {
+      triangleGroup.innerHTML = "";
+
+      const shape = createSvgElement("polygon", {
+        points: pointsToString(triangle),
+        fill: "#2ecc71",
+        stroke: "#27ae60",
+        strokeWidth: 2
+      });
+      triangleGroup.appendChild(shape);
+
+      triangle.forEach((pt, i) => {
+        const circle = createSvgElement("circle", {
+          cx: pt.x,
+          cy: pt.y,
+          r: 6,
+          class: "vertex"
+        });
+        circle.addEventListener("mousedown", e => {
+          e.stopPropagation();
+          if (pivotIndex === null) {
+            pivotIndex = i;
+            renderGhostCircles();
+            renderPulses([0, 1, 2].filter(j => j !== pivotIndex));
+          } else if (pivotIndex !== i) {
+            movingIndex = i;
+            isRotating = true;
+            clearPulses();
+            highlightRotationPath();
+          } else if (isRotating) {
+            onMouseClick(e);
+          }
+        });
+        triangleGroup.appendChild(circle);
+      });
+
+      if (!pivotIndex && !movingIndex && !isRotating && !goalReached()) {
+        renderPulses([0, 1, 2]);
+      }
+    }
+
+    function renderGhostCircles() {
+      clearGhostCircles();
+      const pivot = triangle[pivotIndex];
+      [0, 1, 2].filter(i => i !== pivotIndex).forEach(i => {
+        const radius = distance(pivot, triangle[i]);
+        const circle = createSvgElement("circle", {
+          cx: pivot.x,
+          cy: pivot.y,
+          r: radius,
+          class: "ghost-circle",
+          id: `ghost-${i}`
+        });
+        svg.appendChild(circle);
+      });
+    }
+
+    function clearGhostCircles() {
+      [0, 1, 2].forEach(i => {
+        const el = document.getElementById(`ghost-${i}`);
+        if (el) svg.removeChild(el);
+      });
+    }
+
+    function highlightRotationPath() {
+      const remaining = [0, 1, 2].filter(i => i !== pivotIndex && i !== movingIndex);
+      remaining.forEach(i => {
+        const el = document.getElementById(`ghost-${i}`);
+        if (el) svg.removeChild(el);
+      });
+      const animateEl = document.getElementById(`ghost-${movingIndex}`);
+      if (animateEl) animateEl.classList.add("animate");
+    }
+
+    function renderPulses(indices) {
+      clearPulses();
+      indices.forEach(i => {
+        const pt = triangle[i];
+        const pulse = createSvgElement("circle", {
+          cx: pt.x,
+          cy: pt.y,
+          r: 8,
+          class: "pulse",
+          id: `pulse-${i}`
+        });
+        svg.appendChild(pulse);
+      });
+    }
+
+    function clearPulses() {
+      [0, 1, 2].forEach(i => {
+        const el = document.getElementById(`pulse-${i}`);
+        if (el) svg.removeChild(el);
+      });
+    }
+
+    function onMouseMove(e) {
+      if (!isRotating || pivotIndex === null || movingIndex === null) return;
+      const pivot = triangle[pivotIndex];
+      const from = triangle[movingIndex];
+      const mousePt = getMousePos(svg, e);
+      const angle = angleBetween(pivot, from, mousePt);
+      triangle = triangle.map(pt => rotateAround(pt, pivot, angle));
+      renderTriangle();
+      highlightRotationPath();
+    }
+
+    function onMouseClick(e) {
+      if (isRotating) {
+        isRotating = false;
+        movingIndex = null;
+        pivotIndex = null;
+        clearGhostCircles();
+
+        while (!isInsideCanvas(triangle)) {
+          triangle = triangle.map(pt => rotateAround(triangle[pivotIndex], pt, 0.01));
+        }
+
+        snapIfCloseToGoal();
+        renderTriangle();
+      }
+    }
+
+    function distance(p1, p2) {
+      return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    }
+
+    function angleBetween(pivot, from, to) {
+      const a1 = Math.atan2(from.y - pivot.y, from.x - pivot.x);
+      const a2 = Math.atan2(to.y - pivot.y, to.x - pivot.x);
+      return a2 - a1;
+    }
+
+    function rotateAround(pt, center, angle) {
+      const dx = pt.x - center.x;
+      const dy = pt.y - center.y;
+      return {
+        x: center.x + dx * Math.cos(angle) - dy * Math.sin(angle),
+        y: center.y + dx * Math.sin(angle) + dy * Math.cos(angle)
+      };
+    }
+
+    function isInsideCanvas(tri) {
+      return tri.every(pt => pt.x >= 0 && pt.x <= width && pt.y >= 0 && pt.y <= height);
+    }
+
+    function snapIfCloseToGoal() {
+      const tol = 5;
+      const match = triangle.every((pt, i) => distance(pt, goalTriangle[i]) < tol);
+      if (match) {
+        triangle = goalTriangle.map(p => ({ ...p }));
+        clearPulses();
+      }
+    }
+
+    function goalReached() {
+      return triangle.every((pt, i) => distance(pt, goalTriangle[i]) < 5);
+    }
+
+    function pointsToString(pts) {
+      return pts.map(p => `${p.x},${p.y}`).join(" ");
+    }
+
+    function getMousePos(svg, evt) {
+      const pt = svg.createSVGPoint();
+      pt.x = evt.clientX;
+      pt.y = evt.clientY;
+      return pt.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    function createSvgElement(tag, attrs = {}) {
+      const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      for (const [key, val] of Object.entries(attrs)) {
+        el.setAttribute(key, val);
+      }
+      return el;
+    }
+
+    renderTriangle();
+  </script>
+</body>
+</html>
