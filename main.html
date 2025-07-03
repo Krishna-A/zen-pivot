@@ -8,9 +8,12 @@
       margin: 0;
       background: #f4f4f4;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
       align-items: center;
       height: 100vh;
+    }
+    #controls {
+      margin: 1em;
     }
     svg {
       border: 1px solid #ccc;
@@ -20,14 +23,11 @@
       fill: #3498db;
       cursor: pointer;
     }
-    .ghost-circle {
-      stroke: gray;
-      stroke-dasharray: 4 2;
-      fill: none;
-    }
-    .ghost-circle.animate {
-      stroke-dasharray: 10 6;
-      animation: dash-spin 1s linear infinite;
+    .label {
+      font-family: sans-serif;
+      font-size: 12px;
+      fill: #333;
+      pointer-events: none;
     }
     .pulse {
       stroke: #3498db;
@@ -40,58 +40,152 @@
       50% { r: 20; opacity: 1; }
       100% { r: 8; opacity: 0.4; }
     }
-    @keyframes dash-spin {
-      0% { stroke-dashoffset: 0; }
-      100% { stroke-dashoffset: 32; }
-    }
   </style>
 </head>
 <body>
+  <div id="controls">
+    <label for="sides">Choose shape: </label>
+    <select id="sides">
+      <option value="2">2 (line)</option>
+      <option value="3" selected>3 (triangle)</option>
+      <option value="4">4 (square)</option>
+      <option value="5">5 (pentagon)</option>
+      <option value="6">6 (hexagon)</option>
+    </select>
+  </div>
   <svg id="board" width="600" height="600"></svg>
 
   <script>
     const svg = document.getElementById("board");
     const width = svg.clientWidth;
     const height = svg.clientHeight;
+    const select = document.getElementById("sides");
 
-    let triangle = [
-      { x: 100, y: 500 },
-      { x: 140, y: 540 },
-      { x: 100, y: 580 }
-    ];
-
-    const goalTriangle = [
-      { x: 500, y: 100 },
-      { x: 540, y: 140 },
-      { x: 500, y: 180 }
-    ];
-
+    let triangle = [];
+    let goalTriangle = [];
     let pivotIndex = null;
-    let movingIndex = null;
     let isRotating = false;
 
     const triangleGroup = createSvgElement("g");
-    const goalOutline = createSvgElement("polygon", {
-      points: pointsToString(goalTriangle),
-      fill: "none",
-      stroke: "#aaa",
-      strokeWidth: 2,
-      strokeDasharray: "4 4"
-    });
+    const gridGroup = createSvgElement("g");
+    const labelGroup = createSvgElement("g");
+    const goalOutline = createSvgElement("polygon", {});
+    svg.innerHTML = "";
+    svg.appendChild(gridGroup);
     svg.appendChild(goalOutline);
     svg.appendChild(triangleGroup);
+    svg.appendChild(labelGroup);
 
     svg.addEventListener("mousemove", onMouseMove);
     svg.addEventListener("mousedown", onMouseClick);
+    select.addEventListener("change", () => init(parseInt(select.value)));
+
+    function drawGrid() {
+      gridGroup.innerHTML = "";
+      const lines = 50;
+      const spacingX = width / lines;
+      const spacingY = height / lines;
+      for (let i = 0; i <= lines; i++) {
+        const x = i * spacingX;
+        const y = i * spacingY;
+
+        const vLine = createSvgElement("line", {
+          x1: x,
+          y1: 0,
+          x2: x,
+          y2: height,
+          stroke: "#eee",
+          "stroke-width": 1
+        });
+        const hLine = createSvgElement("line", {
+          x1: 0,
+          y1: y,
+          x2: width,
+          y2: y,
+          stroke: "#eee",
+          "stroke-width": 1
+        });
+        gridGroup.appendChild(vLine);
+        gridGroup.appendChild(hLine);
+
+        if (i % 5 === 0) {
+          const topLabel = createSvgElement("text", {
+            x: x + 2,
+            y: 10,
+            class: "label"
+          });
+          topLabel.textContent = i;
+          gridGroup.appendChild(topLabel);
+
+          const bottomLabel = createSvgElement("text", {
+            x: x + 2,
+            y: height - 4,
+            class: "label"
+          });
+          bottomLabel.textContent = i;
+          gridGroup.appendChild(bottomLabel);
+
+          const leftLabel = createSvgElement("text", {
+            x: 2,
+            y: y - 2,
+            class: "label"
+          });
+          leftLabel.textContent = i;
+          gridGroup.appendChild(leftLabel);
+
+          const rightLabel = createSvgElement("text", {
+            x: width - 20,
+            y: y - 2,
+            class: "label"
+          });
+          rightLabel.textContent = i;
+          gridGroup.appendChild(rightLabel);
+        }
+      }
+    }
+
+    function init(n) {
+      pivotIndex = null;
+      isRotating = false;
+      const radiusUnits = 10;
+      const spacing = width / 50;
+      const radius = radiusUnits * spacing;
+      triangle = createRegularPolygon(n, radius, { x: 120, y: 480 });
+      goalTriangle = createRegularPolygon(n, radius, { x: 480, y: 120 });
+      drawGrid();
+
+      goalOutline.setAttribute("points", pointsToString(goalTriangle));
+      goalOutline.setAttribute("fill", "none");
+      goalOutline.setAttribute("stroke", "#aaa");
+      goalOutline.setAttribute("stroke-width", "2");
+      goalOutline.setAttribute("stroke-dasharray", "4 4");
+
+      renderTriangle();
+    }
+
+    function createRegularPolygon(sides, radius, center) {
+      const angleOffset = -Math.PI / 2;
+      return Array.from({ length: sides }, (_, i) => {
+        const angle = (2 * Math.PI * i) / sides + angleOffset;
+        return {
+          x: center.x + radius * Math.cos(angle),
+          y: center.y + radius * Math.sin(angle)
+        };
+      });
+    }
 
     function renderTriangle() {
       triangleGroup.innerHTML = "";
+      labelGroup.innerHTML = "";
+      clearPulses();
+
+      const fillColor = goalReached() ? "#2ecc71" : "#bdc3c7";
 
       const shape = createSvgElement("polygon", {
         points: pointsToString(triangle),
-        fill: "#2ecc71",
-        stroke: "#27ae60",
-        strokeWidth: 2
+        fill: fillColor,
+        stroke: "#606060",
+        "stroke-width": 3
       });
       triangleGroup.appendChild(shape);
 
@@ -104,58 +198,25 @@
         });
         circle.addEventListener("mousedown", e => {
           e.stopPropagation();
-          if (pivotIndex === null) {
+          if (!isRotating) {
             pivotIndex = i;
-            renderGhostCircles();
-            renderPulses([0, 1, 2].filter(j => j !== pivotIndex));
-          } else if (pivotIndex !== i) {
-            movingIndex = i;
             isRotating = true;
-            clearPulses();
-            highlightRotationPath();
-          } else if (isRotating) {
-            onMouseClick(e);
           }
         });
         triangleGroup.appendChild(circle);
-      });
 
-      if (!pivotIndex && !movingIndex && !isRotating && !goalReached()) {
-        renderPulses([0, 1, 2]);
-      }
-    }
-
-    function renderGhostCircles() {
-      clearGhostCircles();
-      const pivot = triangle[pivotIndex];
-      [0, 1, 2].filter(i => i !== pivotIndex).forEach(i => {
-        const radius = distance(pivot, triangle[i]);
-        const circle = createSvgElement("circle", {
-          cx: pivot.x,
-          cy: pivot.y,
-          r: radius,
-          class: "ghost-circle",
-          id: `ghost-${i}`
+        const label = createSvgElement("text", {
+          x: pt.x + 18,
+          y: pt.y - 18,
+          class: "label"
         });
-        svg.appendChild(circle);
+        label.textContent = String.fromCharCode(65 + i);
+        labelGroup.appendChild(label);
       });
-    }
 
-    function clearGhostCircles() {
-      [0, 1, 2].forEach(i => {
-        const el = document.getElementById(`ghost-${i}`);
-        if (el) svg.removeChild(el);
-      });
-    }
-
-    function highlightRotationPath() {
-      const remaining = [0, 1, 2].filter(i => i !== pivotIndex && i !== movingIndex);
-      remaining.forEach(i => {
-        const el = document.getElementById(`ghost-${i}`);
-        if (el) svg.removeChild(el);
-      });
-      const animateEl = document.getElementById(`ghost-${movingIndex}`);
-      if (animateEl) animateEl.classList.add("animate");
+      if (!isRotating && !goalReached()) {
+        renderPulses(triangle.map((_, i) => i));
+      }
     }
 
     function renderPulses(indices) {
@@ -174,35 +235,24 @@
     }
 
     function clearPulses() {
-      [0, 1, 2].forEach(i => {
-        const el = document.getElementById(`pulse-${i}`);
-        if (el) svg.removeChild(el);
-      });
+      document.querySelectorAll(".pulse").forEach(el => el.remove());
     }
 
     function onMouseMove(e) {
-      if (!isRotating || pivotIndex === null || movingIndex === null) return;
+      if (!isRotating || pivotIndex === null) return;
       const pivot = triangle[pivotIndex];
-      const from = triangle[movingIndex];
+      const from = triangle[(pivotIndex + 1) % triangle.length];
       const mousePt = getMousePos(svg, e);
       const angle = angleBetween(pivot, from, mousePt);
       triangle = triangle.map(pt => rotateAround(pt, pivot, angle));
       renderTriangle();
-      highlightRotationPath();
     }
 
     function onMouseClick(e) {
       if (isRotating) {
         isRotating = false;
-        movingIndex = null;
         pivotIndex = null;
-        clearGhostCircles();
-
-        while (!isInsideCanvas(triangle)) {
-          triangle = triangle.map(pt => rotateAround(triangle[pivotIndex], pt, 0.01));
-        }
-
-        snapIfCloseToGoal();
+        const snapped = snapIfCloseToGoal();
         renderTriangle();
       }
     }
@@ -226,21 +276,20 @@
       };
     }
 
-    function isInsideCanvas(tri) {
-      return tri.every(pt => pt.x >= 0 && pt.x <= width && pt.y >= 0 && pt.y <= height);
-    }
-
     function snapIfCloseToGoal() {
-      const tol = 5;
+      const tol = 15;
       const match = triangle.every((pt, i) => distance(pt, goalTriangle[i]) < tol);
       if (match) {
         triangle = goalTriangle.map(p => ({ ...p }));
         clearPulses();
+        return true;
       }
+      return false;
     }
 
     function goalReached() {
-      return triangle.every((pt, i) => distance(pt, goalTriangle[i]) < 5);
+      const tol = 15;
+      return triangle.every((pt, i) => distance(pt, goalTriangle[i]) < tol);
     }
 
     function pointsToString(pts) {
@@ -262,7 +311,7 @@
       return el;
     }
 
-    renderTriangle();
+    init(3);
   </script>
 </body>
 </html>
